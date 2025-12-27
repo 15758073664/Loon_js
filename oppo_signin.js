@@ -1,3 +1,11 @@
+/***********************
+ * OPPO 商城 自动签到
+ * 适用：Loon
+ * 功能：
+ *  1. http-request 抓 Cookie + constToken
+ *  2. cron 自动获取 activityId 并签到
+ ***********************/
+
 const STORE_KEY = "oppo_auth";
 
 /**
@@ -11,14 +19,19 @@ if (typeof $request !== "undefined") {
   if (cookie && constToken) {
     const auth = {
       cookie,
-      constToken
+      constToken,
+      time: Date.now()
     };
     $persistentStore.write(JSON.stringify(auth), STORE_KEY);
-    $notification.post("OPPO 商城", "登录信息获取成功", "Cookie & constToken 已保存");
+    $notification.post(
+      "OPPO 商城",
+      "登录信息获取成功",
+      "Cookie & constToken 已保存"
+    );
   } else {
     $notification.post(
       "OPPO 商城",
-      "登录信息不完整",
+      "登录信息获取失败",
       "请从签到页面触发请求"
     );
   }
@@ -32,7 +45,11 @@ if (typeof $request !== "undefined") {
  */
 const raw = $persistentStore.read(STORE_KEY);
 if (!raw) {
-  $notification.post("OPPO 商城", "未检测到登录信息", "请先手动签到一次");
+  $notification.post(
+    "OPPO 商城",
+    "未检测到登录信息",
+    "请先手动签到一次"
+  );
   $done();
   return;
 }
@@ -42,13 +59,17 @@ const cookie = auth.cookie;
 const constToken = auth.constToken;
 
 /**
- * 获取当月 activityId
+ * 获取当月签到 activityId
  */
 function getActivityId() {
   return new Promise((resolve, reject) => {
+    const url =
+      "https://hd.opposhop.cn/api/cn/oapi/marketing/cumulativeSignIn/queryActivityList" +
+      "?business=1&scene=1";
+
     $httpClient.get(
       {
-        url: "https://hd.opposhop.cn/api/cn/oapi/marketing/cumulativeSignIn/queryActivityList",
+        url: url,
         headers: {
           Cookie: cookie,
           constToken: constToken,
@@ -57,14 +78,19 @@ function getActivityId() {
         }
       },
       (err, resp, data) => {
-        if (err) return reject(err);
+        if (err) return reject("活动接口请求失败");
+
         try {
           const json = JSON.parse(data);
           const list = json?.data?.activityList || [];
-          if (!list.length) reject("未获取到签到活动");
-          else resolve(list[0].activityId);
+
+          if (!list.length) {
+            reject("未获取到签到活动");
+          } else {
+            resolve(list[0].activityId);
+          }
         } catch (e) {
-          reject("activityId 解析失败");
+          reject("活动响应解析失败");
         }
       }
     );
@@ -87,16 +113,18 @@ function signIn(activityId) {
           "User-Agent": "oppostore"
         },
         body: JSON.stringify({
-          activityId,
+          activityId: activityId,
           business: 1
         })
       },
       (err, resp, data) => {
-        if (err) return reject(err);
+        if (err) return reject("签到接口请求失败");
+
         try {
           const json = JSON.parse(data);
           if (json.succeed) {
-            resolve(json.data?.awardValue || "签到成功");
+            const reward = json.data?.awardValue || "签到成功";
+            resolve(reward);
           } else {
             reject(json.message || "签到失败");
           }
@@ -115,9 +143,17 @@ function signIn(activityId) {
   try {
     const activityId = await getActivityId();
     const reward = await signIn(activityId);
-    $notification.post("OPPO 商城", "签到成功 🎉", `奖励：${reward}`);
+    $notification.post(
+      "OPPO 商城",
+      "签到成功 🎉",
+      `奖励：${reward}`
+    );
   } catch (e) {
-    $notification.post("OPPO 商城", "签到失败 ❌", String(e));
+    $notification.post(
+      "OPPO 商城",
+      "签到失败 ❌",
+      String(e)
+    );
   }
   $done();
 })();
